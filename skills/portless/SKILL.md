@@ -246,11 +246,14 @@ Use the service command when users want the proxy to start automatically after r
 
 ```bash
 portless service install
+portless service install --wildcard   # Bake wildcard subdomain fallback into the service
 portless service status
 portless service uninstall
 ```
 
 The service uses the default clean URL behavior: HTTPS on port 443 with `.localhost` names. macOS and Linux install a root-owned service so port 443 can bind at boot. Windows installs a Task Scheduler startup task that runs as SYSTEM. Installation and removal may require administrator privileges. `portless clean` automatically removes the service.
+
+Reach for `--wildcard` (or `PORTLESS_WILDCARD=1`) when one app needs to answer to many subdomains of the same parent (e.g. `tenant1.myapp.localhost`, `tenant2.myapp.localhost`). Without baking the flag into the installed service, the daemon comes up in strict mode on every boot regardless of `PORTLESS_WILDCARD` in the shell, since the launchd plist, systemd unit, and Windows task each run with their own environment.
 
 ## CLI Reference
 
@@ -278,6 +281,7 @@ The service uses the default clean URL behavior: HTTPS on port 443 with `.localh
 | `portless proxy start --wildcard`      | Allow unregistered subdomains to fall back to parent route     |
 | `portless proxy stop`                  | Stop the proxy                                                 |
 | `portless service install`             | Start the HTTPS proxy when the OS starts                       |
+| `portless service install --wildcard`  | Same, plus bake wildcard subdomain fallback into the service   |
 | `portless service status`              | Show service and proxy status                                  |
 | `portless service uninstall`           | Remove the startup service                                     |
 | `portless alias <name> <port>`         | Register a static route (e.g. for Docker containers)           |

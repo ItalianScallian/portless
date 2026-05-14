@@ -18,6 +18,8 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 
+const { writeFileSync } = await import("node:fs");
+
 vi.mock("./certs.js", () => ({
   ensureCerts: vi.fn(() => ({
     certPath: "/fake/server.pem",
@@ -199,6 +201,66 @@ describe("buildServiceSpec", () => {
     expect(spec.plist).toContain("<key>KeepAlive</key>\n  <true/>");
     expect(spec.plist).not.toContain("SuccessfulExit");
   });
+
+  it("omits --wildcard from the macOS plist when not requested", () => {
+    const spec = buildServiceSpec({
+      platform: "darwin",
+      nodePath: "/usr/local/bin/node",
+      entryScript: "/usr/local/lib/portless/cli.js",
+      userHome: "/Users/alice",
+      uid: "501",
+      gid: "20",
+    });
+
+    if (spec.platform !== "darwin") throw new Error("Expected macOS service spec");
+    expect(spec.programArguments).not.toContain("--wildcard");
+    expect(spec.plist).not.toContain("--wildcard");
+  });
+
+  it("bakes --wildcard into the macOS plist when useWildcard is true", () => {
+    const spec = buildServiceSpec({
+      platform: "darwin",
+      nodePath: "/usr/local/bin/node",
+      entryScript: "/usr/local/lib/portless/cli.js",
+      userHome: "/Users/alice",
+      uid: "501",
+      gid: "20",
+      useWildcard: true,
+    });
+
+    if (spec.platform !== "darwin") throw new Error("Expected macOS service spec");
+    expect(spec.programArguments).toContain("--wildcard");
+    expect(spec.plist).toContain("<string>--wildcard</string>");
+  });
+
+  it("bakes --wildcard into the systemd unit when useWildcard is true", () => {
+    const spec = buildServiceSpec({
+      platform: "linux",
+      nodePath: "/usr/bin/node",
+      entryScript: "/usr/lib/portless/cli.js",
+      userHome: "/home/alice",
+      uid: "1000",
+      gid: "1000",
+      useWildcard: true,
+    });
+
+    if (spec.platform !== "linux") throw new Error("Expected Linux service spec");
+    expect(spec.execStart).toContain("--wildcard");
+    expect(spec.unit).toContain('"--wildcard"');
+  });
+
+  it("bakes --wildcard into the Windows script when useWildcard is true", () => {
+    const spec = buildServiceSpec({
+      platform: "win32",
+      nodePath: "C:\\Program Files\\nodejs\\node.exe",
+      entryScript: "C:\\portless\\cli.js",
+      userHome: "C:\\Users\\Alice",
+      useWildcard: true,
+    });
+
+    if (spec.platform !== "win32") throw new Error("Expected Windows service spec");
+    expect(spec.script).toContain("--wildcard");
+  });
 });
 
 describe("buildServiceUninstallSudoArgs", () => {
@@ -278,6 +340,7 @@ describe("handleService", () => {
     });
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(writeFileSync).mockClear();
   });
 
   afterEach(() => {
@@ -343,5 +406,63 @@ describe("handleService", () => {
 
     expect(stopIndex).toBeGreaterThanOrEqual(0);
     expect(restartIndex).toBeGreaterThan(stopIndex);
+  });
+
+  it("writes a systemd unit with --wildcard when install receives the flag", async () => {
+    setPlatform("linux");
+    setGetuid(0);
+    const runner = vi.fn(() => ({ status: 0, stdout: "", stderr: "" }));
+
+    await handleService(["service", "install", "--wildcard"], {
+      entryScript: "/fake/cli.js",
+      runner,
+    });
+
+    const unitWrite = vi
+      .mocked(writeFileSync)
+      .mock.calls.find(([target]) => target === "/etc/systemd/system/portless.service");
+    expect(unitWrite).toBeDefined();
+    expect(String(unitWrite?.[1])).toContain('"--wildcard"');
+  });
+
+  it("honors PORTLESS_WILDCARD=1 when installing without the flag", async () => {
+    setPlatform("linux");
+    setGetuid(0);
+    const previous = process.env.PORTLESS_WILDCARD;
+    process.env.PORTLESS_WILDCARD = "1";
+    const runner = vi.fn(() => ({ status: 0, stdout: "", stderr: "" }));
+
+    try {
+      await handleService(["service", "install"], {
+        entryScript: "/fake/cli.js",
+        runner,
+      });
+    } finally {
+      if (previous === undefined) delete process.env.PORTLESS_WILDCARD;
+      else process.env.PORTLESS_WILDCARD = previous;
+    }
+
+    const unitWrite = vi
+      .mocked(writeFileSync)
+      .mock.calls.find(([target]) => target === "/etc/systemd/system/portless.service");
+    expect(unitWrite).toBeDefined();
+    expect(String(unitWrite?.[1])).toContain('"--wildcard"');
+  });
+
+  it("omits --wildcard from the systemd unit by default", async () => {
+    setPlatform("linux");
+    setGetuid(0);
+    const runner = vi.fn(() => ({ status: 0, stdout: "", stderr: "" }));
+
+    await handleService(["service", "install"], {
+      entryScript: "/fake/cli.js",
+      runner,
+    });
+
+    const unitWrite = vi
+      .mocked(writeFileSync)
+      .mock.calls.find(([target]) => target === "/etc/systemd/system/portless.service");
+    expect(unitWrite).toBeDefined();
+    expect(String(unitWrite?.[1])).not.toContain("--wildcard");
   });
 });

@@ -9,6 +9,7 @@ import {
   DEFAULT_TLD,
   getProtocolPort,
   isProxyRunning,
+  isWildcardEnvEnabled,
 } from "./cli-utils.js";
 import { fixOwnership } from "./utils.js";
 
@@ -46,6 +47,7 @@ type ServiceContext = {
   user: UserContext;
   pathEnv: string;
   programData: string;
+  useWildcard: boolean;
 };
 
 export type ServiceSpec =
@@ -165,7 +167,7 @@ function resolveUserContext(platform: SupportedPlatform): UserContext {
   };
 }
 
-function buildProxyCommand(entryScript: string): string[] {
+function buildProxyCommand(entryScript: string, options: { useWildcard: boolean }): string[] {
   const config = buildProxyStartConfig({
     useHttps: true,
     lanMode: false,
@@ -174,6 +176,7 @@ function buildProxyCommand(entryScript: string): string[] {
     includePort: true,
     proxyPort: SERVICE_PORT,
     skipTrust: true,
+    useWildcard: options.useWildcard,
   });
   return [entryScript, "proxy", "start", ...config.args];
 }
@@ -284,6 +287,7 @@ export function buildServiceSpec(options: {
   stateDir?: string;
   pathEnv?: string;
   programData?: string;
+  useWildcard?: boolean;
 }): ServiceSpec {
   const ctx: ServiceContext = {
     platform: options.platform,
@@ -298,8 +302,9 @@ export function buildServiceSpec(options: {
     },
     pathEnv: options.pathEnv || "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
     programData: options.programData || "C:\\ProgramData",
+    useWildcard: options.useWildcard ?? false,
   };
-  const proxyCommand = buildProxyCommand(ctx.entryScript);
+  const proxyCommand = buildProxyCommand(ctx.entryScript, { useWildcard: ctx.useWildcard });
 
   if (ctx.platform === "darwin") {
     const programArguments = [ctx.nodePath, ...proxyCommand];
@@ -357,7 +362,10 @@ export function buildServiceSpec(options: {
   };
 }
 
-function currentServiceSpec(entryScript: string): ServiceSpec {
+function currentServiceSpec(
+  entryScript: string,
+  options: { useWildcard?: boolean } = {}
+): ServiceSpec {
   if (!isSupportedPlatform(process.platform)) {
     throw new Error(`Unsupported platform: ${process.platform}`);
   }
@@ -374,6 +382,7 @@ function currentServiceSpec(entryScript: string): ServiceSpec {
     stateDir: process.env.PORTLESS_STATE_DIR || defaultStateDir(process.platform, user.home),
     pathEnv: process.env.PATH,
     programData: process.env.ProgramData,
+    useWildcard: options.useWildcard,
   });
 }
 
@@ -513,9 +522,15 @@ function prepareTrust(stateDir: string): void {
   console.warn(colors.yellow("Run `portless trust` if browsers show certificate warnings."));
 }
 
-async function installService(entryScript: string, runner: CommandRunner): Promise<void> {
-  requireUnixElevation([entryScript, "service", "install"], runner);
-  const spec = currentServiceSpec(entryScript);
+async function installService(
+  entryScript: string,
+  runner: CommandRunner,
+  options: { useWildcard: boolean }
+): Promise<void> {
+  const elevationArgs = [entryScript, "service", "install"];
+  if (options.useWildcard) elevationArgs.push("--wildcard");
+  requireUnixElevation(elevationArgs, runner);
+  const spec = currentServiceSpec(entryScript, { useWildcard: options.useWildcard });
   prepareTrust(spec.stateDir);
 
   if (spec.platform === "darwin") {
@@ -680,6 +695,12 @@ ${colors.bold("Usage:")}
   ${colors.cyan("portless service uninstall")}    Stop and remove the startup service
   ${colors.cyan("portless service status")}       Show service and proxy status
 
+${colors.bold("Options:")}
+  --wildcard                    Bake wildcard subdomain fallback into the
+                                installed service so the daemon comes up in
+                                wildcard mode on every boot. Equivalent to
+                                ${colors.cyan("PORTLESS_WILDCARD=1 portless service install")}.
+
 ${colors.bold("Notes:")}
   The service uses the default clean URL mode: HTTPS on port 443.
   macOS and Linux install a root-owned service so port 443 can bind at boot.
@@ -701,7 +722,8 @@ export async function handleService(
 
   try {
     if (action === "install") {
-      await installService(options.entryScript, runner);
+      const useWildcard = args.includes("--wildcard") || isWildcardEnvEnabled();
+      await installService(options.entryScript, runner, { useWildcard });
       return;
     }
     if (action === "uninstall") {

@@ -261,6 +261,14 @@ portless service uninstall
 
 The service uses portless defaults: HTTPS on port 443 with `.localhost` names. macOS and Linux install a root-owned service so port 443 can bind at boot. Windows installs a Task Scheduler startup task that runs as SYSTEM. Installation and removal may require administrator privileges. `portless clean` automatically removes the service.
 
+Pass `--wildcard` (or set `PORTLESS_WILDCARD=1`) to bake wildcard subdomain fallback into the installed service so the daemon comes up in wildcard mode on every boot:
+
+```bash
+portless service install --wildcard
+```
+
+Without this flag, the service-installed daemon starts in strict mode regardless of `PORTLESS_WILDCARD` in your shell, since the launchd plist, systemd unit, and Windows task each run with their own environment.
+
 ## LAN mode
 
 ```bash
@@ -349,6 +357,7 @@ portless proxy stop              # Stop the proxy
 
 # OS startup service
 portless service install         # Start HTTPS proxy when the OS starts
+portless service install --wildcard  # Bake wildcard subdomain fallback into the service
 portless service status          # Show service and proxy status
 portless service uninstall       # Remove the startup service
 ```
