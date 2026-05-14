@@ -1468,6 +1468,7 @@ ${colors.bold("Examples:")}
   portless run next dev               # -> https://<project>.localhost
   portless run next dev               # in worktree -> https://<worktree>.<project>.localhost
   portless service install            # Start HTTPS proxy on OS startup
+  portless service install --wildcard # Bake wildcard subdomain fallback into the service
   portless get backend                # -> https://backend.localhost
   portless myapp --tailscale next dev # -> also https://<node>.ts.net (tailnet)
   portless myapp --funnel next dev    # -> also https://<node>.ts.net (public)
